@@ -231,6 +231,7 @@ export type playerConfig = {
   loadTimeout: number;
   skipInactive: Boolean;
   showWarning: Boolean;
+  showDebug: Boolean;
 };
 
 export type playerMetaData = {
@@ -249,3 +250,16 @@ export type actionWithDelay = {
   doAction: () => void;
   delay: number;
 };
+
+export enum ReplayerEvents {
+  Start = 'start',
+  Pause = 'pause',
+  Resume = 'resume',
+  Resize = 'resize',
+  Finish = 'finish',
+  FullsnapshotRebuilded = 'fullsnapshot-rebuilded',
+  LoadStylesheetStart = 'load-stylesheet-start',
+  LoadStylesheetEnd = 'load-stylesheet-end',
+  SkipStart = 'skip-start',
+  SkipEnd = 'skip-end',
+}

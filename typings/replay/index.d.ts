@@ -30,8 +30,10 @@ export declare class Replayer {
     private waitForStylesheetLoad;
     private applyIncremental;
     private resolveMissingNode;
+    private moveAndHover;
     private hoverElements;
     private isUserInteraction;
     private restoreSpeed;
     private warnNodeNotFound;
+    private debugNodeNotFound;
 }

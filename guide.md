@@ -215,6 +215,7 @@ The replayer accepts options as its constructor's second parameter, and it has t
 | loadTimeout  | 0             | timeout of loading remote style sheet           |
 | skipInactive | false         | whether to skip inactive time                   |
 | showWarning  | true          | whether to print warning messages during replay |
+| showDebug    | false         | whether to print debug messages during replay   |
 
 #### Use rrweb-player
 
@@ -245,9 +246,29 @@ new rrwebPlayer({
   target: document.body, // customizable root element
   data: {
     events,
+    autoPlay: true,
   },
 });
 ```
+
+#### Events
+
+Developers may want to extend the rrweb's replayer or respond to its events. Such as giving a notification when the replayer starts to skip inactive time.
+So rrweb expose a public API `on` which allow developers listen to the events and customize the reactions, and it has the following events:
+
+| event                  | description                        |
+| ---------------------- | ---------------------------------- |
+| start                  | started to replay                  |
+| pause                  | paused the replay                  |
+| resume                 | resumed the replay                 |
+| finish                 | finished the replay                |
+| fullsnapshot-rebuilded | rebuilded a full snapshot          |
+| load-stylesheet-start  | started to load remote stylesheets |
+| load-stylesheet-end    | loaded remote stylesheets          |
+| skip-start             | started to skip inactive time      |
+| skip-end               | skipped inactive time              |
+
+The rrweb-replayer also re-expose the event listener via a `component.addEventListener` API.
 
 ## API
 

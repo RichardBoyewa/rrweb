@@ -17,6 +17,7 @@ import {
   actionWithDelay,
   incrementalSnapshotEvent,
   incrementalData,
+  ReplayerEvents,
 } from '../types';
 import { mirror } from '../utils';
 import injectStyleRules from './styles/inject-style';
@@ -68,6 +69,7 @@ export class Replayer {
       loadTimeout: 0,
       skipInactive: false,
       showWarning: true,
+      showDebug: false,
     };
     this.config = Object.assign({}, defaultConfig, config);
 
@@ -125,11 +127,12 @@ export class Replayer {
     }
     this.timer.addActions(actions);
     this.timer.start();
+    this.emitter.emit(ReplayerEvents.Start);
   }
 
   public pause() {
     this.timer.clear();
-    this.emitter.emit('pause');
+    this.emitter.emit(ReplayerEvents.Pause);
   }
 
   public resume(timeOffset = 0) {
@@ -151,7 +154,7 @@ export class Replayer {
     }
     this.timer.addActions(actions);
     this.timer.start();
-    this.emitter.emit('resume');
+    this.emitter.emit(ReplayerEvents.Resume);
   }
 
   private setupDom() {
@@ -200,7 +203,7 @@ export class Replayer {
         break;
       case EventType.Meta:
         castFn = () =>
-          this.emitter.emit('resize', {
+          this.emitter.emit(ReplayerEvents.Resize, {
             width: event.data.width,
             height: event.data.height,
           });
@@ -241,7 +244,7 @@ export class Replayer {
                 speed: Math.min(Math.round(skipTime / SKIP_TIME_INTERVAL), 360),
               };
               this.setConfig(payload);
-              this.emitter.emit('skip-start', payload);
+              this.emitter.emit(ReplayerEvents.SkipStart, payload);
             }
           }
         };
@@ -255,7 +258,7 @@ export class Replayer {
       this.lastPlayedEvent = event;
       if (event === this.events[this.events.length - 1]) {
         this.restoreSpeed();
-        this.emitter.emit('finish');
+        this.emitter.emit(ReplayerEvents.Finish);
       }
     };
     return wrappedCastFn;
@@ -278,6 +281,7 @@ export class Replayer {
     for (let idx = 0; idx < injectStyleRules.length; idx++) {
       (styleEl.sheet! as CSSStyleSheet).insertRule(injectStyleRules[idx], idx);
     }
+    this.emitter.emit(ReplayerEvents.FullsnapshotRebuilded);
     this.waitForStylesheetLoad();
   }
 
@@ -295,7 +299,7 @@ export class Replayer {
           if (!css.sheet) {
             if (unloadSheets.size === 0) {
               this.pause();
-              this.emitter.emit('wait-stylesheet');
+              this.emitter.emit(ReplayerEvents.LoadStylesheetStart);
               timer = window.setTimeout(() => {
                 this.resume();
                 // mark timer was called
@@ -307,7 +311,7 @@ export class Replayer {
               unloadSheets.delete(css);
               if (unloadSheets.size === 0 && timer !== -1) {
                 this.resume();
-                this.emitter.emit('stylesheet-loaded');
+                this.emitter.emit(ReplayerEvents.LoadStylesheetEnd);
                 if (timer) {
                   window.clearTimeout(timer);
                 }
@@ -424,13 +428,7 @@ export class Replayer {
           d.positions.forEach(p => {
             const action = {
               doAction: () => {
-                this.mouse.style.left = `${p.x}px`;
-                this.mouse.style.top = `${p.y}px`;
-                const target = mirror.getNode(p.id);
-                if (!target) {
-                  return this.warnNodeNotFound(d, p.id);
-                }
-                this.hoverElements((target as Node) as Element);
+                this.moveAndHover(d, p.x, p.y, p.id);
               },
               delay: p.timeOffset + e.timestamp - this.baselineTime,
             };
@@ -446,9 +444,9 @@ export class Replayer {
           break;
         }
         const event = new Event(MouseInteractions[d.type].toLowerCase());
-        let target = mirror.getNode(d.id);
+        const target = mirror.getNode(d.id);
         if (!target) {
-          return this.warnNodeNotFound(d, d.id);
+          return this.debugNodeNotFound(d, d.id);
         }
         switch (d.type) {
           case MouseInteractions.Blur:
@@ -472,6 +470,7 @@ export class Replayer {
              * clicked at this moment.
              */
             if (!isSync) {
+              this.moveAndHover(d, d.x, d.y, d.id);
               this.mouse.classList.remove('active');
               // tslint:disable-next-line
               void this.mouse.offsetWidth;
@@ -492,7 +491,7 @@ export class Replayer {
         }
         const target = mirror.getNode(d.id);
         if (!target) {
-          return this.warnNodeNotFound(d, d.id);
+          return this.debugNodeNotFound(d, d.id);
         }
         if ((target as Node) === this.iframe.contentDocument) {
           this.iframe.contentWindow!.scrollTo({
@@ -514,7 +513,7 @@ export class Replayer {
         break;
       }
       case IncrementalSource.ViewportResize:
-        this.emitter.emit('resize', {
+        this.emitter.emit(ReplayerEvents.Resize, {
           width: d.width,
           height: d.height,
         });
@@ -531,7 +530,7 @@ export class Replayer {
         }
         const target = mirror.getNode(d.id);
         if (!target) {
-          return this.warnNodeNotFound(d, d.id);
+          return this.debugNodeNotFound(d, d.id);
         }
         try {
           ((target as Node) as HTMLInputElement).checked = d.isChecked;
@@ -574,6 +573,16 @@ export class Replayer {
     }
   }
 
+  private moveAndHover(d: incrementalData, x: number, y: number, id: number) {
+    this.mouse.style.left = `${x}px`;
+    this.mouse.style.top = `${y}px`;
+    const target = mirror.getNode(id);
+    if (!target) {
+      return this.debugNodeNotFound(d, id);
+    }
+    this.hoverElements((target as Node) as Element);
+  }
+
   private hoverElements(el: Element) {
     this.iframe
       .contentDocument!.querySelectorAll('.\\:hover')
@@ -603,7 +612,7 @@ export class Replayer {
     }
     const payload = { speed: this.noramlSpeed };
     this.setConfig(payload);
-    this.emitter.emit('skip-end', payload);
+    this.emitter.emit(ReplayerEvents.SkipEnd, payload);
     this.noramlSpeed = -1;
   }
 
@@ -612,5 +621,19 @@ export class Replayer {
       return;
     }
     console.warn(REPLAY_CONSOLE_PREFIX, `Node with id '${id}' not found in`, d);
+  }
+
+  private debugNodeNotFound(d: incrementalData, id: number) {
+    /**
+     * There maybe some valid scenes of node not being found.
+     * Because DOM events are macrotask and MutationObserver callback
+     * is microtask, so events fired on a removed DOM may emit
+     * snapshots in the reverse order.
+     */
+    if (!this.config.showDebug) {
+      return;
+    }
+    // tslint:disable-next-line: no-console
+    console.log(REPLAY_CONSOLE_PREFIX, `Node with id '${id}' not found in`, d);
   }
 }
