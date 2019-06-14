@@ -3,6 +3,7 @@ import {
   throttleOptions,
   listenerHandler,
   hookResetter,
+  blockClass,
 } from './types';
 import { INode } from 'rrweb-snapshot';
 
@@ -113,18 +114,24 @@ export function getWindowWidth(): number {
   );
 }
 
-const BLOCK_CLASS = 'rr-block';
-export function isBlocked(node: Node | null): boolean {
+export function isBlocked(node: Node | null, blockClass: blockClass): boolean {
   if (!node) {
     return false;
   }
   if (node.nodeType === node.ELEMENT_NODE) {
-    return (
-      (node as HTMLElement).classList.contains(BLOCK_CLASS) ||
-      isBlocked(node.parentNode)
-    );
+    let needBlock = false;
+    if (typeof blockClass === 'string') {
+      needBlock = (node as HTMLElement).classList.contains(blockClass);
+    } else {
+      (node as HTMLElement).classList.forEach(className => {
+        if (blockClass.test(className)) {
+          needBlock = true;
+        }
+      });
+    }
+    return needBlock || isBlocked(node.parentNode, blockClass);
   }
-  return isBlocked(node.parentNode);
+  return isBlocked(node.parentNode, blockClass);
 }
 
 export function isAncestorRemoved(target: INode): boolean {

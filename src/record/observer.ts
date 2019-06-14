@@ -26,8 +26,14 @@ import {
   hookResetter,
   textCursor,
   attributeCursor,
+  blockClass,
 } from '../types';
-import { deepDelete, isParentRemoved, isParentDropped } from './collection';
+import { deepDelete, isParentRemoved, isAncestorInSet } from './collection';
+
+const moveKey = (id: number, parentId: number) => `${id}@${parentId}`;
+function isINode(n: Node | INode): n is INode {
+  return '__sn' in n;
+}
 
 /**
  * Mutation observer will merge several mutations into an array and pass
@@ -46,24 +52,43 @@ import { deepDelete, isParentRemoved, isParentDropped } from './collection';
  * which means all the id related calculation should be lazy too.
  * @param cb mutationCallBack
  */
-function initMutationObserver(cb: mutationCallBack): MutationObserver {
+function initMutationObserver(
+  cb: mutationCallBack,
+  blockClass: blockClass,
+  inlineStylesheet: boolean,
+): MutationObserver {
   const observer = new MutationObserver(mutations => {
     const texts: textCursor[] = [];
     const attributes: attributeCursor[] = [];
-    const removes: removedNodeMutation[] = [];
+    let removes: removedNodeMutation[] = [];
     const adds: addedNodeMutation[] = [];
 
-    const addsSet = new Set<Node>();
+    const addedSet = new Set<Node>();
+    const movedSet = new Set<Node>();
     const droppedSet = new Set<Node>();
 
-    const genAdds = (n: Node) => {
-      if (isBlocked(n)) {
+    const movedMap: Record<string, true> = {};
+
+    const genAdds = (n: Node | INode, target?: Node | INode) => {
+      if (isBlocked(n, blockClass)) {
         return;
       }
-      addsSet.add(n);
-      droppedSet.delete(n);
+      if (isINode(n)) {
+        movedSet.add(n);
+        let targetId: number | null = null;
+        if (target && isINode(target)) {
+          targetId = target.__sn.id;
+        }
+        if (targetId) {
+          movedMap[moveKey(n.__sn.id, targetId)] = true;
+        }
+      } else {
+        addedSet.add(n);
+        droppedSet.delete(n);
+      }
       n.childNodes.forEach(childN => genAdds(childN));
     };
+
     mutations.forEach(mutation => {
       const {
         type,
@@ -76,7 +101,7 @@ function initMutationObserver(cb: mutationCallBack): MutationObserver {
       switch (type) {
         case 'characterData': {
           const value = target.textContent;
-          if (!isBlocked(target) && value !== oldValue) {
+          if (!isBlocked(target, blockClass) && value !== oldValue) {
             texts.push({
               value,
               node: target,
@@ -86,7 +111,7 @@ function initMutationObserver(cb: mutationCallBack): MutationObserver {
         }
         case 'attributes': {
           const value = (target as HTMLElement).getAttribute(attributeName!);
-          if (isBlocked(target) || value === oldValue) {
+          if (isBlocked(target, blockClass) || value === oldValue) {
             return;
           }
           let item: attributeCursor | undefined = attributes.find(
@@ -104,22 +129,23 @@ function initMutationObserver(cb: mutationCallBack): MutationObserver {
           break;
         }
         case 'childList': {
-          addedNodes.forEach(n => genAdds(n));
+          addedNodes.forEach(n => genAdds(n, target));
           removedNodes.forEach(n => {
             const nodeId = mirror.getId(n as INode);
             const parentId = mirror.getId(target as INode);
-            if (isBlocked(n)) {
+            if (isBlocked(n, blockClass)) {
               return;
             }
             // removed node has not been serialized yet, just remove it from the Set
-            if (addsSet.has(n)) {
-              deepDelete(addsSet, n);
+            if (addedSet.has(n)) {
+              deepDelete(addedSet, n);
               droppedSet.add(n);
-            } else if (addsSet.has(target) && nodeId === -1) {
+            } else if (addedSet.has(target) && nodeId === -1) {
               /**
                * If target was newly added and removed child node was
                * not serialized, it means the child node has been removed
-               * before callback fired, so we can ignore it.
+               * before callback fired, so we can ignore it because
+               * newly added node will be serialized without child nodes.
                * TODO: verify this
                */
             } else if (isAncestorRemoved(target as INode)) {
@@ -129,6 +155,8 @@ function initMutationObserver(cb: mutationCallBack): MutationObserver {
                * the node is also removed which we do not need to track
                * and replay.
                */
+            } else if (movedSet.has(n) && movedMap[moveKey(nodeId, parentId)]) {
+              deepDelete(movedSet, n);
             } else {
               removes.push({
                 parentId,
@@ -144,22 +172,62 @@ function initMutationObserver(cb: mutationCallBack): MutationObserver {
       }
     });
 
-    Array.from(addsSet).forEach(n => {
-      if (!isParentDropped(droppedSet, n) && !isParentRemoved(removes, n)) {
-        adds.push({
-          parentId: mirror.getId((n.parentNode as Node) as INode),
-          previousId: !n.previousSibling
-            ? n.previousSibling
-            : mirror.getId(n.previousSibling as INode),
-          nextId: !n.nextSibling
-            ? n.nextSibling
-            : mirror.getId(n.nextSibling as INode),
-          node: serializeNodeWithId(n, document, mirror.map, true)!,
-        });
+    /**
+     * Sometimes child node may be pushed before its newly added
+     * parent, so we init a queue to store these nodes.
+     */
+    const addQueue: Node[] = [];
+    const pushAdd = (n: Node) => {
+      const parentId = mirror.getId((n.parentNode as Node) as INode);
+      if (parentId === -1) {
+        return addQueue.push(n);
+      }
+      adds.push({
+        parentId,
+        previousId: !n.previousSibling
+          ? n.previousSibling
+          : mirror.getId(n.previousSibling as INode),
+        nextId: !n.nextSibling
+          ? n.nextSibling
+          : mirror.getId((n.nextSibling as unknown) as INode),
+        node: serializeNodeWithId(
+          n,
+          document,
+          mirror.map,
+          blockClass,
+          true,
+          inlineStylesheet,
+        )!,
+      });
+    };
+
+    Array.from(movedSet).forEach(pushAdd);
+
+    Array.from(addedSet).forEach(n => {
+      if (!isAncestorInSet(droppedSet, n) && !isParentRemoved(removes, n)) {
+        pushAdd(n);
+      } else if (isAncestorInSet(movedSet, n)) {
+        pushAdd(n);
       } else {
         droppedSet.add(n);
       }
     });
+
+    while (addQueue.length) {
+      if (
+        addQueue.every(
+          n => mirror.getId((n.parentNode as Node) as INode) === -1,
+        )
+      ) {
+        /**
+         * If all nodes in queue could not find a serialized parent,
+         * it may be a bug or corner case. We need to escape the
+         * dead while loop at once.
+         */
+        break;
+      }
+      pushAdd(addQueue.shift()!);
+    }
 
     const payload = {
       texts: texts
@@ -239,11 +307,12 @@ function initMousemoveObserver(cb: mousemoveCallBack): listenerHandler {
 
 function initMouseInteractionObserver(
   cb: mouseInteractionCallBack,
+  blockClass: blockClass,
 ): listenerHandler {
   const handlers: listenerHandler[] = [];
   const getHandler = (eventKey: keyof typeof MouseInteractions) => {
     return (event: MouseEvent) => {
-      if (isBlocked(event.target as Node)) {
+      if (isBlocked(event.target as Node, blockClass)) {
         return;
       }
       const id = mirror.getId(event.target as INode);
@@ -268,9 +337,12 @@ function initMouseInteractionObserver(
   };
 }
 
-function initScrollObserver(cb: scrollCallback): listenerHandler {
+function initScrollObserver(
+  cb: scrollCallback,
+  blockClass: blockClass,
+): listenerHandler {
   const updatePosition = throttle<UIEvent>(evt => {
-    if (!evt.target || isBlocked(evt.target as Node)) {
+    if (!evt.target || isBlocked(evt.target as Node, blockClass)) {
       return;
     }
     const id = mirror.getId(evt.target as INode);
@@ -307,29 +379,26 @@ function initViewportResizeObserver(
 }
 
 const INPUT_TAGS = ['INPUT', 'TEXTAREA', 'SELECT'];
-const HOOK_PROPERTIES: Array<[HTMLElement, string]> = [
-  [HTMLInputElement.prototype, 'value'],
-  [HTMLInputElement.prototype, 'checked'],
-  [HTMLSelectElement.prototype, 'value'],
-  [HTMLTextAreaElement.prototype, 'value'],
-];
-const IGNORE_CLASS = 'rr-ignore';
 const lastInputValueMap: WeakMap<EventTarget, inputValue> = new WeakMap();
-function initInputObserver(cb: inputCallback): listenerHandler {
+function initInputObserver(
+  cb: inputCallback,
+  blockClass: blockClass,
+  ignoreClass: string,
+): listenerHandler {
   function eventHandler(event: Event) {
     const { target } = event;
     if (
       !target ||
       !(target as Element).tagName ||
       INPUT_TAGS.indexOf((target as Element).tagName) < 0 ||
-      isBlocked(target as Node)
+      isBlocked(target as Node, blockClass)
     ) {
       return;
     }
     const type: string | undefined = (target as HTMLInputElement).type;
     if (
       type === 'password' ||
-      (target as HTMLElement).classList.contains(IGNORE_CLASS)
+      (target as HTMLElement).classList.contains(ignoreClass)
     ) {
       return;
     }
@@ -378,9 +447,15 @@ function initInputObserver(cb: inputCallback): listenerHandler {
     HTMLInputElement.prototype,
     'value',
   );
+  const hookProperties: Array<[HTMLElement, string]> = [
+    [HTMLInputElement.prototype, 'value'],
+    [HTMLInputElement.prototype, 'checked'],
+    [HTMLSelectElement.prototype, 'value'],
+    [HTMLTextAreaElement.prototype, 'value'],
+  ];
   if (propertyDescriptor && propertyDescriptor.set) {
     handlers.push(
-      ...HOOK_PROPERTIES.map(p =>
+      ...hookProperties.map(p =>
         hookSetter<HTMLElement>(p[0], p[1], {
           set() {
             // mock to a normal event
@@ -396,14 +471,23 @@ function initInputObserver(cb: inputCallback): listenerHandler {
 }
 
 export default function initObservers(o: observerParam): listenerHandler {
-  const mutationObserver = initMutationObserver(o.mutationCb);
+  const mutationObserver = initMutationObserver(
+    o.mutationCb,
+    o.blockClass,
+    o.inlineStylesheet,
+  );
   const mousemoveHandler = initMousemoveObserver(o.mousemoveCb);
   const mouseInteractionHandler = initMouseInteractionObserver(
     o.mouseInteractionCb,
+    o.blockClass,
   );
-  const scrollHandler = initScrollObserver(o.scrollCb);
+  const scrollHandler = initScrollObserver(o.scrollCb, o.blockClass);
   const viewportResizeHandler = initViewportResizeObserver(o.viewportResizeCb);
-  const inputHandler = initInputObserver(o.inputCb);
+  const inputHandler = initInputObserver(
+    o.inputCb,
+    o.blockClass,
+    o.ignoreClass,
+  );
   return () => {
     mutationObserver.disconnect();
     mousemoveHandler();

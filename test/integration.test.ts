@@ -2,9 +2,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as puppeteer from 'puppeteer';
 import { assertSnapshot } from './utils';
+import { Suite } from 'mocha';
 
-describe('record integration tests', () => {
-  function getHtml(fileName: string): string {
+interface ISuite extends Suite {
+  code: string;
+  browser: puppeteer.Browser;
+}
+
+describe('record integration tests', function(this: ISuite) {
+  const getHtml = (fileName: string): string => {
     const filePath = path.resolve(__dirname, `./html/${fileName}`);
     const html = fs.readFileSync(filePath, 'utf8');
     return html.replace(
@@ -24,7 +30,7 @@ describe('record integration tests', () => {
     </body>
     `,
     );
-  }
+  };
 
   before(async () => {
     this.browser = await puppeteer.launch({
@@ -155,7 +161,7 @@ describe('record integration tests', () => {
     assertSnapshot(snapshots, __filename, 'block');
   });
 
-  it('should record DOM node movement', async () => {
+  it('should record DOM node movement 1', async () => {
     const page: puppeteer.Page = await this.browser.newPage();
     await page.goto('about:blank');
     await page.setContent(getHtml.call(this, 'move-node.html'));
@@ -170,6 +176,21 @@ describe('record integration tests', () => {
       div.appendChild(span);
     });
     const snapshots = await page.evaluate('window.snapshots');
-    assertSnapshot(snapshots, __filename, 'move-node');
+    assertSnapshot(snapshots, __filename, 'move-node-1');
+  });
+
+  it('should record DOM node movement 2', async () => {
+    const page: puppeteer.Page = await this.browser.newPage();
+    await page.goto('about:blank');
+    await page.setContent(getHtml.call(this, 'move-node.html'));
+
+    await page.evaluate(() => {
+      const div = document.createElement('div');
+      const span = document.querySelector('span')!;
+      document.body.appendChild(div);
+      div.appendChild(span);
+    });
+    const snapshots = await page.evaluate('window.snapshots');
+    assertSnapshot(snapshots, __filename, 'move-node-2');
   });
 });

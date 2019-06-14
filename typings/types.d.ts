@@ -70,10 +70,14 @@ export declare type eventWithTime = event & {
     timestamp: number;
     delay?: number;
 };
+export declare type blockClass = string | RegExp;
 export declare type recordOptions = {
     emit?: (e: eventWithTime, isCheckout?: boolean) => void;
     checkoutEveryNth?: number;
     checkoutEveryNms?: number;
+    blockClass?: blockClass;
+    ignoreClass?: string;
+    inlineStylesheet?: boolean;
 };
 export declare type observerParam = {
     mutationCb: mutationCallBack;
@@ -82,6 +86,9 @@ export declare type observerParam = {
     scrollCb: scrollCallback;
     viewportResizeCb: viewportResizeCallback;
     inputCb: inputCallback;
+    blockClass: blockClass;
+    ignoreClass: string;
+    inlineStylesheet: boolean;
 };
 export declare type textCursor = {
     node: Node;
@@ -181,9 +188,11 @@ export declare type playerConfig = {
     speed: number;
     root: Element;
     loadTimeout: number;
-    skipInactive: Boolean;
-    showWarning: Boolean;
-    showDebug: Boolean;
+    skipInactive: boolean;
+    showWarning: boolean;
+    showDebug: boolean;
+    blockClass: string;
+    liveMode: boolean;
 };
 export declare type playerMetaData = {
     totalTime: number;
@@ -199,6 +208,11 @@ export declare type actionWithDelay = {
     doAction: () => void;
     delay: number;
 };
+export declare type Handler = (event?: unknown) => void;
+export declare type Emitter = {
+    on(type: string, handler: Handler): void;
+    emit(type: string, event?: unknown): void;
+};
 export declare enum ReplayerEvents {
     Start = "start",
     Pause = "pause",
@@ -209,6 +223,7 @@ export declare enum ReplayerEvents {
     LoadStylesheetStart = "load-stylesheet-start",
     LoadStylesheetEnd = "load-stylesheet-end",
     SkipStart = "skip-start",
-    SkipEnd = "skip-end"
+    SkipEnd = "skip-end",
+    MouseInteraction = "mouse-interaction"
 }
 export {};

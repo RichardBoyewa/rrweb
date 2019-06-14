@@ -98,10 +98,15 @@ export type eventWithTime = event & {
   delay?: number;
 };
 
+export type blockClass = string | RegExp;
+
 export type recordOptions = {
   emit?: (e: eventWithTime, isCheckout?: boolean) => void;
   checkoutEveryNth?: number;
   checkoutEveryNms?: number;
+  blockClass?: blockClass;
+  ignoreClass?: string;
+  inlineStylesheet?: boolean;
 };
 
 export type observerParam = {
@@ -111,6 +116,9 @@ export type observerParam = {
   scrollCb: scrollCallback;
   viewportResizeCb: viewportResizeCallback;
   inputCb: inputCallback;
+  blockClass: blockClass;
+  ignoreClass: string;
+  inlineStylesheet: boolean;
 };
 
 export type textCursor = {
@@ -229,9 +237,11 @@ export type playerConfig = {
   speed: number;
   root: Element;
   loadTimeout: number;
-  skipInactive: Boolean;
-  showWarning: Boolean;
-  showDebug: Boolean;
+  skipInactive: boolean;
+  showWarning: boolean;
+  showDebug: boolean;
+  blockClass: string;
+  liveMode: boolean;
 };
 
 export type playerMetaData = {
@@ -251,6 +261,13 @@ export type actionWithDelay = {
   delay: number;
 };
 
+export type Handler = (event?: unknown) => void;
+
+export type Emitter = {
+  on(type: string, handler: Handler): void;
+  emit(type: string, event?: unknown): void;
+};
+
 export enum ReplayerEvents {
   Start = 'start',
   Pause = 'pause',
@@ -262,4 +279,5 @@ export enum ReplayerEvents {
   LoadStylesheetEnd = 'load-stylesheet-end',
   SkipStart = 'skip-start',
   SkipEnd = 'skip-end',
+  MouseInteraction = 'mouse-interaction',
 }
